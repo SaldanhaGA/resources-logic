@@ -1,0 +1,19 @@
+name: Lean Action CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leanprover/lean-action@v1
+        with:
+          # descarrega os `.olean` do Mathlib em vez de os compilar
+          auto-config: true
+          use-mathlib-cache: true
+          build-args: "ResourcesLogic"

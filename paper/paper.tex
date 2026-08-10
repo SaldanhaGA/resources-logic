@@ -1,0 +1,1108 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{stmaryrd}
+\usepackage{mathpartir}
+\usepackage{booktabs,float}
+\usepackage{xspace}
+\usepackage{url}
+
+\newcommand{\Lean}{Lean~4\xspace}
+\newcommand{\State}{\sigma}
+\newcommand{\Loc}{\mathit{Loc}}
+\newcommand{\Nat}{\mathbb{N}}
+\newcommand{\Int}{\mathbb{Z}}
+\newcommand{\aval}[1]{\mathcal{A}\llbracket #1 \rrbracket}
+\newcommand{\bval}[1]{\mathcal{B}\llbracket #1 \rrbracket}
+\newcommand{\tacost}[1]{\mathcal{T\!A}\llbracket #1 \rrbracket}
+\newcommand{\tbcost}[1]{\mathcal{T\!B}\llbracket #1 \rrbracket}
+\newcommand{\evals}[4]{\langle #1, #2\rangle \rightarrow^{#3} #4}
+\newcommand{\triple}[4]{\{#1\}\;#2\;\{#3 \mid #4\}}
+\newcommand{\subst}[3]{#1[#2/#3]}
+\newcommand{\upd}[3]{#1[#2 \mapsto #3]}
+\newcommand{\cst}[1]{\mathsf{C_{#1}}}
+\newcommand{\Valid}{\vDash}
+\newcommand{\ValidE}{\vDash_{\!=}}
+\newcommand{\BigO}{\mathcal{O}}
+\newcommand{\BigTh}{\Theta}
+\newcommand{\BigOm}{\Omega}
+\newcommand{\code}[1]{\texttt{#1}}
+
+% Filled (black) square for QED, overriding llncs's hollow square.
+\renewcommand{\squareforqed}{\ensuremath{\blacksquare}}
+
+\begin{document}
+
+\title{Mechanizing a Resource-Aware Hoare Logic
+with Asymptotic Cost Assertions in Lean}
+\titlerunning{A Mechanized Resource-Aware Hoare Logic with Asymptotic
+Assertions}
+
+\author{Gabriel Ara\'ujo Saldanha\orcidID{0009-0009-1965-7882} \and
+Rodrigo Ribeiro\orcidID{0000-0003-0131-5154}}
+\authorrunning{G. A. Saldanha and R. Ribeiro}
+\institute{Programa de P\'os-Gradua\c{c}\~ao em Ci\^encia da Computa\c{c}\~ao,\\
+        Universidade Federal de Ouro Preto, Ouro Preto, MG, Brazil\\
+        \email{gabriel.saldanha@aluno.ufop.edu.br},\;
+\email{rodrigo.ribeiro@ufop.edu.br}}
+
+\maketitle
+
+\begin{abstract}
+Reasoning about the cost of a program is central to computer science,
+yet the operation counts behind a complexity bound are usually
+established informally, where a single miscounted iteration invalidates
+the result.
+Resource-aware Hoare logics internalize this reasoning through
+cost-annotated triples $\triple{P}{S}{Q}{t}$, but their metatheory
+typically rests only on pen-and-paper proofs.
+We present a mechanization in
+\Lean{} of one such logic, covering its cost-instrumented
+semantics, the worst-case upper-bound cost logic with soundness and a
+relative-completeness result absent from the source, and its verification
+condition generator (VCG).
+Our mechanization exposed two errors in the original formulation: an unsound
+\code{while} rule whose iteration bound is off by one, and a primitive \code{for}
+semantics at odds with the fixed per-iteration cost its own rule charges, both of
+which we correct and document.
+We further add elementary asymptotic ($\BigO$) cost assertions at the level of
+triples, as derivable weakenings of the concrete bounds, and use them to analyse
+two examples: a division algorithm in $\BigO(n)$, and the halving loop of binary
+search in $\BigO(\log n)$.
+
+\keywords{Resource analysis \and Hoare logic \and Cost semantics \and
+Asymptotic complexity \and \Lean{} \and Proof mechanization.}
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+
+The analysis of algorithms is a cornerstone of computer science.
+From the first programming courses onward, students are trained to reason about
+\emph{how much} a program consumes, not only \emph{what} it computes: to count
+the operations executed as a function of the input size and to summarize that
+count as an asymptotic growth rate.
+This habit of thought is what lets a computer scientist compare designs, choose
+data structures, and predict whether a program will scale, and it is exercised
+constantly, in lectures, in textbooks, and at the whiteboard.
+Program logics, by contrast, have traditionally certified only \emph{what} a
+program computes, leaving the resource side of a specification to the same
+informal, pen-and-paper argument that fills an algorithms course.
+
+Making that argument formal is both a foundational and a practical concern.
+It is foundational because the operation counts behind an asymptotic bound are
+proofs like any other and deserve the scrutiny we already apply to correctness;
+it is practical because several domains depend on cost guarantees that must not
+be wrong.
+Real-time and embedded systems must respect execution-time
+budgets~\cite{Wilhelm2008}, and cryptographic implementations must run in time
+that does not depend on secret inputs, lest they leak those secrets through a
+timing side channel~\cite{Barbosa2021,Almeida2016}.
+A range of formal approaches has grown around these needs, from type systems
+that infer resource bounds automatically~\cite{HofmannJost2003,Hoffmann2012} to
+libraries that make asymptotic $\BigO$ claims first-class objects in a proof
+assistant~\cite{Gueneau2018}.
+What unites them is the goal of putting the resource usage of a program on the
+same rigorous footing as its functional correctness, verified together rather
+than argued apart.
+
+Silva's dissertation~\cite{Silva2022} develops one such logic for a standard
+imperative \code{while}-language, adapting the cost discipline of the EasyCrypt
+cost logic~\cite{Barbosa2021}.
+Its judgements are cost-annotated Hoare triples $\triple{P}{S}{Q}{t}$, read: if
+$S$ starts in a state satisfying $P$ and terminates, then the final state
+satisfies $Q$ and the execution consumes resource $t$.
+The dissertation instantiates the discipline to \emph{execution time} as a Hoare
+logic of worst-case \emph{upper bounds}, in which $t$ bounds the running time of
+$S$.
+An annotated program, whose loops carry the oracle information their proofs need,
+is discharged by a verification condition generator (VCG) that reduces the
+validity of the triple to a set of first-order proof obligations.
+The metatheory (soundness of the logic and of the VCG) is established
+by pen-and-paper proofs.
+
+Pen-and-paper cost proofs are notoriously error-prone: the cost carried in a
+conclusion is a numeric expression that must be tracked through every
+rule, and a
+single off-by-one in an iteration bound silently invalidates a soundness
+argument.
+This paper reports on a complete mechanization of Silva's proposed logic in
+\Lean{}~\cite{Moura2021} on top of the Mathlib library~\cite{Mathlib2020},
+and on an extension of the framework with asymptotic cost assertions.
+It is worth noticing that this effort is not a transcription exercise:
+reconstructing proofs in a
+proof assistant forces every implicit assumption into the open and surfaced two
+genuine errors in the source text (Section~\ref{sec:deviations}).
+
+More specifically, the main contributions are:
+\begin{itemize}
+\item A \emph{full mechanization} of the upper-bound resource logic
+(Sections~\ref{sec:background}--\ref{sec:logic}): a
+deterministic
+cost-instrumented operational semantics; the cost
+logic as an inductive
+judgement with machine-checked soundness; a
+\emph{relative-completeness}
+theorem that does not
+appear in the original text;
+and its VCG with a soundness proof.
+\item A \emph{shallow-embedding} design in which assertions
+and cost terms are
+\Lean{} predicates and functions.
+The substitution lemma becomes true by definition,
+and completeness is
+provable without an expressiveness (G\"odel-style)
+argument about an
+assertion language.
+\item The \emph{identification and correction of two errors}
+in the source
+text (Section~\ref{sec:deviations}): the \code{while}
+rule is unsound because its iteration bound is off by
+one relative to the cost it charges, and the primitive
+\code{for} semantics is inconsistent with the fixed
+per-iteration cost its own rule charges.
+Both are documented as explicit, justified deviations.
+\item An \emph{extension with asymptotic cost assertions}
+(Section~\ref{sec:asymptotic}): an elementary
+formalization of $\BigO$,
+$\BigOm$, and $\BigTh$ over $\Nat \to \Nat$, and a
+validity predicate
+that lifts $\BigO$ to the level of triples,
+indexed by the size of the
+input.
+Asymptotic assertions arise as derivable weakenings
+of the concrete bounds
+already proved, and never replace them.
+\item Two worked \emph{examples}
+(Section~\ref{sec:examples}): a division
+algorithm proved to run in $\BigO(n)$ steps, and the
+halving loop of binary search proved to run in
+$\BigO(\log n)$ steps, where the logarithmic bound
+follows from a variant that advances by one against a
+geometrically shrinking value.
+\end{itemize}
+We describe all results using \LaTeX{} notation; every definition follows its
+\Lean{} implementation as closely as possible.
+All results depend only on the three standard
+axioms of \Lean{}'s logic, which are assumed pervasively by Mathlib and which we
+describe in Section~\ref{sec:axioms}.
+The complete formalization source code and instructions on how to build it are available on-line~\cite{repo-logic}.
+
+The rest of this paper is organized as follows.
+Section~\ref{sec:background} reviews the annotated language, its cost model, and
+the cost-instrumented semantics.
+Section~\ref{sec:logic} presents the mechanized logic and its metatheory, and
+Section~\ref{sec:deviations} discusses the corrected errors.
+Section~\ref{sec:asymptotic} introduces asymptotic cost assertions, and
+Section~\ref{sec:examples} applies them to the two examples.
+Section~\ref{sec:related} surveys related work, and
+Section~\ref{sec:conclusion} concludes.
+
+\section{The Annotated Language and its Cost Semantics}\label{sec:background}
+
+\subsection{Syntax and States}
+
+The object language is a standard imperative \code{while}-language over integer
+variables and one-dimensional arrays.
+Arithmetic expressions $a \in \code{AExp}$ are built from integer constants,
+scalar variables $x$, array accesses $x[a]$, the binary operators $+, -, \times,
+/, \char`\^{}$, and a bounded summation $\sum_{x=lo}^{hi} a$; boolean
+expressions
+$b \in \code{BExp}$ are the usual comparisons and connectives.
+Commands $S \in \code{Stmt}$ are
+\[
+S ::= \code{skip} \mid x := a \mid x[a_1] := a_2 \mid S_1; S_2 \mid
+\code{if}\;b\;\code{then}\;S_1\;\code{else}\;S_2 \mid
+\code{while}\;b\;\code{do}\;S.
+\]
+A memory \emph{location} is either a scalar $\Loc.\code{var}\;x$ or
+an array cell
+$\Loc.\code{arr}\;x\;n$, and a \emph{state} is a single total map
+$\State : \Loc \to \Int$.
+We write $\upd{\State}{\ell}{v}$ for the state that agrees with $\State$ except
+at $\ell$, where it takes value $v$.
+Unifying scalars and array cells into one location type keeps a state a single
+function and makes the substitution lemma below a definitional equality.
+
+\subsection{Cost Model}
+
+The cost of each atomic operation is a parameter of the system, so that the
+development is not tied to any particular machine.
+A \emph{cost model} $C$ is a record assigning a natural number to each syntactic
+construct: $\cst{cst}$ for evaluating a constant, $\cst{var}$ for reading a
+variable, $\cst{array}$ for an array access, one constant per arithmetic and
+boolean operator, and $\cst{skip}$, $\cst{assignV}$, $\cst{assignA}$ for the
+statements.
+Every theorem is proved for an arbitrary $C$.
+The examples use the \emph{unit model}, in which every constant equals $1$; this
+is the cost dictionary under which the concrete numbers in
+Section~\ref{sec:examples} are stated.
+
+The evaluation cost of an expression is defined compositionally.
+Value evaluation $\aval{a}\State$ and $\bval{b}\State$ are standard; the cost
+functions $\tacost{a}\State$ and $\tbcost{b}\State$ sum the atomic costs of the
+operators involved.
+Only the summation $\sum$ makes a cost depend on the state, since its number of
+iterations is a value; every $\sum$-free expression has a constant evaluation
+cost, a fact the VCG relies on.
+
+\subsection{Cost-Instrumented Operational Semantics}
+
+Execution is modelled by an inductive big-step relation
+$\evals{S}{\State}{t}{\State'}$, an inductive \Lean{} proposition whose numeric
+index $t$ is the total resource consumed by running $S$ from $\State$ to
+$\State'$.
+Selected rules are:
+\[
+\inferrule*[right=\textsc{Assign}]{\;}
+{\evals{x := a}{\State}{\tacost{a}\State + \cst{assignV}}
+{\upd{\State}{\Loc.\code{var}\,x}{\aval{a}\State}}}
+\]
+\[
+\inferrule*[right=\textsc{Seq}]
+{\evals{S_1}{\State}{t_1}{\State'}
+\\ \evals{S_2}{\State'}{t_2}{\State''}}
+{\evals{S_1;S_2}{\State}{t_1+t_2}{\State''}}
+\]
+\[
+\inferrule*[right=\textsc{While-T}]
+{\bval{b}\State = \code{true} \\ \evals{S}{\State}{t}{\State''} \\
+\evals{\code{while}\;b\;\code{do}\;S}{\State''}{t'}{\State'}}
+{\evals{\code{while}\;b\;\code{do}\;S}{\State}
+{\tbcost{b}\State + t + t'}{\State'}}
+\]
+The \textsc{Assign} rule charges the evaluation cost of $a$ plus the fixed
+assignment cost, and updates the scalar location.
+The \textsc{Seq} rule adds the costs of the two sub-executions.
+Each \code{while} iteration charges the cost of testing the guard,
+$\tbcost{b}\State$, in addition to the cost of the body and of the remaining
+iterations; the companion rule \textsc{While-F} charges $\tbcost{b}\State$ alone
+when the guard is false.
+The relation is deterministic: both the final state and the cost are unique.
+
+\begin{lemma}[\code{Eval.deterministic}]\label{lem:det}
+If $\evals{S}{\State}{t_1}{\State_1}$ and
+$\evals{S}{\State}{t_2}{\State_2}$,
+then $t_1 = t_2$ and $\State_1 = \State_2$.
+\end{lemma}
+Determinism means that a program run from a given state has a single cost and a
+single result, so the cost charged by a triple is a well-defined quantity.
+
+\section{The Mechanized Logic}\label{sec:logic}
+
+\subsection{Assertions, Cost Terms, and Validity}
+
+Assertions and cost terms are given a \emph{shallow} embedding: an
+assertion is a
+\Lean{} predicate over states and a cost term is a function into the naturals,
+\[
+\code{Assn} \triangleq \State \to \code{Prop},
+\qquad
+\code{Cost} \triangleq \State \to \Nat,
+\]
+with the cost term evaluated in the \emph{initial} state of the triple.
+The logical variables of the paper logic (names that fix the initial value of
+a program variable across the triple) become ordinary \Lean{} variables
+universally quantified around the statement.
+Substitution into an assertion is state update,
+$\subst{P}{a}{x} \triangleq
+\lambda\State.\;P\,(\upd{\State}{x}{\aval{a}\State})$,
+so the substitution lemma $\State \vDash \subst{P}{a}{x}
+\Leftrightarrow \upd{\State}{x}{\aval{a}\State} \vDash P$ holds by
+$\code{Iff.rfl}$: it is true \emph{by definition}, not by an inductive argument.
+
+Validity is \emph{total correctness with a cost bound}:
+\[
+\Valid\;\triple{P}{S}{Q}{T} \;\triangleq\;
+\forall\State.\; P\,\State \Rightarrow
+\exists\,\State'\,t.\; \evals{S}{\State}{t}{\State'} \wedge Q\,\State'
+\wedge t \le T\,\State,
+\]
+which quantifies over runs that \emph{terminate} and so expresses \emph{total}
+correctness.
+The original Definition~10 of the dissertation, read literally, quantifies only
+over terminating derivations and is therefore \emph{partial} correctness despite
+its name; we keep that reading as a separate predicate for the record and adopt
+total correctness, without which the \code{while} rule cannot be complete
+(Section~\ref{sec:deviations}).
+
+\subsection{The Hoare Kernel and its Metatheory}
+
+The upper-bound logic is an inductive judgement, $\code{Hoare}\;C\;P\;S\;Q\;T$,
+whose five arguments are the cost model $C$ (Section~\ref{sec:background}); the
+precondition $P$ and the postcondition $Q$, both assertions $\State \to
+\code{Prop}$; the command $S$; and the cost term $T : \State \to \Nat$ that bounds
+the resource $S$ consumes.
+We display this judgement in the customary triple notation, the two denoting the
+same object:
+\[
+\code{Hoare}\;C\;P\;S\;Q\;T
+\;\;\equiv\;\;
+{\vdash_{C}}\;\triple{P}{S}{Q}{T},
+\]
+read: under cost model $C$, every terminating run of $S$ from a state satisfying
+$P$ ends in a state satisfying $Q$ and costs at most $T$, the bound being
+evaluated at the initial state.
+Since the cost model $C$ is fixed throughout, we omit it from the notation from
+now on, writing simply $\triple{P}{S}{Q}{T}$.
+Its atomic and structural rules charge the cost
+model directly:
+\[
+\inferrule*[right=\textsc{Skip}]{\;}{\triple{P}{\code{skip}}{P}{\cst{skip}}}
+\qquad
+\inferrule*[right=\textsc{Assign}]{\;}
+{\triple{\subst{Q}{a}{x}}{x := a}{Q}{\tacost{a} + \cst{assignV}}}
+\]
+\[
+\inferrule*[right=\textsc{If}]
+{\triple{P \wedge b}{S_1}{Q}{T_1} \\ \triple{P \wedge \neg
+b}{S_2}{Q}{T_2}}
+{\triple{P}{\code{if}\;b\;\code{then}\;S_1\;\code{else}\;S_2}{Q}
+{\max(T_1, T_2) + \tbcost{b}}}
+\]
+The interesting rule is \code{while}.
+Rather than adopt the dissertation's oracle rule directly, the kernel uses an
+invariant $I$, a variant $f : \State \to \Nat$ that strictly decreases on every
+iteration, and a \emph{remaining-cost} function $E$ that upper-bounds the cost
+still to be paid:
+\[
+{\small
+\inferrule*[right=\textsc{While}]
+{ \forall k\,n\,c.\;
+        \triple{I \wedge b \wedge f = k \wedge E = n
+        \wedge \tbcost{b} + T = c}
+        {S}
+        {I \wedge f < k \wedge E + c \le n}{T}
+        \\\\
+        \forall\State.\; I\,\State \wedge
+        \bval{b}\State = \code{false}
+\Rightarrow \tbcost{b}\State \le E\,\State }
+{\triple{I}{\code{while}\;b\;\code{do}\;S}{I \wedge \neg b}{E}}
+}
+\]
+The body premise threads three auxiliary values through the triple: the current
+variant value $k$, the current remaining budget $n$, and the cost $c$ of one
+guard test plus the body's charged cost $T$.
+Its postcondition demands that the variant strictly decreases ($f < k$) and that
+the new remaining cost plus what was just paid stays within budget
+($E + c \le n$).
+The exit premise requires that, once the guard is false, the remaining cost
+covers the final guard test.
+This formulation is sound and, unlike the paper rule, drives the completeness
+proof; the dissertation's oracle rule (its Fig.~4.8) is recovered as a
+\emph{derived} rule.
+
+The consequence rule conditions cost weakening on the precondition, which is
+sound and stronger than the textbook rule:
+$\triple{P'}{S}{Q'}{T'}$ with $P \Rightarrow P'$, $Q' \Rightarrow Q$, and
+$\forall\State.\,P\,\State \Rightarrow T'\,\State \le T\,\State$ yields
+$\triple{P}{S}{Q}{T}$.
+A rule for existentially quantified preconditions,
+$\bigl(\forall i.\;\triple{P\,i}{S}{Q}{T}\bigr) \Rightarrow
+\triple{\exists i.\,P\,i}{S}{Q}{T}$, is added to support completeness.
+
+\begin{theorem}[\code{Hoare.sound}, Theorem~3
+of~\cite{Silva2022}]\label{thm:sound}
+If $\vdash \triple{P}{S}{Q}{T}$ then $\Valid\;\triple{P}{S}{Q}{T}$.
+\end{theorem}
+The proof is by induction on the derivation.
+Each atomic rule matches the corresponding \code{Eval} constructor; the
+\code{while} case uses the variant $f$ for a well-founded argument on the number
+of iterations and the budget invariant $E + c \le n$ to bound the accumulated
+cost.
+
+\begin{theorem}[\code{Hoare.complete}]\label{thm:complete}
+If $\Valid\;\triple{P}{S}{Q}{T}$ then $\vdash \triple{P}{S}{Q}{T}$.
+\end{theorem}
+This converse is \emph{not} proved in the dissertation, and it is worth being
+precise about \emph{why} our proof carries no expressiveness hypothesis.
+Cook's classical relative-completeness theorem~\cite{Cook1978} holds only
+\emph{relative} to the \emph{expressiveness} of the assertion language: that for
+every command and postcondition the language can name the corresponding strongest
+postcondition.
+In a deep embedding, where assertions are formulas of a fixed syntactic language,
+this is a genuine theorem: the strongest postcondition of a loop quantifies
+over the unboundedly many intermediate states of its runs, and capturing that in a
+finite formula needs a G\"odel-style arithmetization.
+Our shallow embedding sidesteps it entirely: since an assertion \emph{is} an
+arbitrary predicate $\State \to \code{Prop}$, the assertion ``language'' is the
+full ambient logic of \Lean{}, so the strongest postcondition of a command
+(literally $\lambda\State'.\;\exists\,\State\,t.\;P\,\State \wedge
+\evals{S}{\State}{t}{\State'}$) and the exact remaining cost of a loop are
+\emph{already} predicates, with nothing to encode.
+Expressiveness therefore holds by construction, which is precisely what turns
+Cook's \emph{relative} converse into an unconditional one here.
+The proof uses this directly: for each initial state $\State_0$ satisfying $P$,
+validity (with determinism) yields the unique run of $S$, from which we build a
+triple with the singleton precondition $\State = \State_0$; the
+existential-precondition rule then reassembles this pointwise family into
+$\vdash \triple{P}{S}{Q}{T}$.
+
+\subsection{The Verification Condition Generator}
+
+Proving triples by hand is tedious; the dissertation therefore provides a
+verification condition generator (VCG) that operates on \emph{annotated}
+programs.
+The obstacle to full automation is the loop: soundly bounding the cost of a
+\code{while} requires facts about it (an invariant, a termination measure, and
+a count of how many times the body runs) that are not, in general, computable
+from the program text.
+Following the dissertation~\cite{Silva2022}, we treat this information as supplied
+from outside, by an \emph{oracle} (the programmer, or a separate inference
+procedure); the VCG
+takes it on trust and reduces the triple to first-order conditions that
+\emph{check} the oracle's guesses against the semantics.
+Concretely, each \code{while} loop is annotated with a tuple
+$(I, f, N, t, \cst{b})$:
+\begin{itemize}
+\item the \emph{invariant} $I : \State \to \code{Prop}$, a property preserved by
+        every iteration and strong enough to entail the postcondition once the guard
+        fails;
+\item the \emph{variant} $f : \State \to \Nat$, a progress measure that strictly
+        advances toward the bound $N$ on each iteration, which is what forces the loop
+        to terminate;
+\item the \emph{iteration bound} $N : \Nat$: while the guard holds the variant stays
+        strictly below $N$, so the body runs at most $N$ times;
+\item the \emph{per-iteration cost} $t : \Nat \to \Nat$, the cost charged to the body
+        on iteration $k$; making it a function of the index $k$ lets the accounting sum
+        costs that differ from one iteration to the next (both examples here use a
+        constant $t$, but a body that does more work on later iterations is equally
+        expressible);
+\item the \emph{guard cost} $\cst{b} : \Nat$, the constant cost of evaluating the
+        loop condition once, incurred $N+1$ times: once before each of the $N$
+        iterations and once for the final failing test.
+\end{itemize}
+None of these is trusted blindly: the side conditions below discharge every one of
+them against the actual semantics, so a wrong annotation merely makes some
+verification condition unprovable instead of yielding an unsound triple.
+By recursion on the annotated program $c$, the VCG computes a
+weakest-precondition assertion paired with a cost bound, written
+$\code{wpc}(c, Q)$, and a finite set of side conditions $\code{VC}(c, Q)$.
+Since $\code{wpc}(c, Q)$ is a pair, we write $\code{wpc}(c, Q)_1$ for its first
+component, the precondition assertion, and $\code{wpc}(c, Q)_2$ for its second, the
+cost bound.
+On atomic and compositional commands both are the expected ones; for instance
+$\code{wpc}(x := a,\, Q) = (\subst{Q}{a}{x},\ \tacost{a} + \cst{assignV})$, and a
+sequence adds the two sub-costs.
+The loop case carries the cost accounting:
+\[
+\code{wpc}(\code{while}\;b\;[I,f,N,t,\cst{b}]\;\code{do}\;c,\ Q)
+\;=\; \Bigl(I,\ \ \lambda\State.\ \textstyle\sum_{i < N} t(i) + (N+1)\cdot\cst{b}\Bigr),
+\]
+charging the $N$ per-iteration body costs plus the $N+1$ guard evaluations.
+Its side conditions are
+\[
+{\small
+\begin{array}{rl}
+\code{VC}(\code{while}\ldots,\, Q) =
+& \bigl(\forall k\,\State.\; I \wedge b \wedge f = k \Rightarrow
+  \code{wpc}(c,\, I \wedge k < f)_1\,\State \\[2pt]
+& \qquad\qquad {}\wedge\ \code{wpc}(c,\, I \wedge k < f)_2\,\State \le t(k)\bigr) \\[2pt]
+& {}\wedge\ \bigl(\forall\State.\; I \wedge \neg b \Rightarrow Q\,\State\bigr)
+  \ \wedge\ \bigl(\forall\State.\; I \wedge b \Rightarrow f\,\State < N\bigr) \\[2pt]
+& {}\wedge\ \bigl(\forall\State.\; I \Rightarrow \tbcost{b}\State = \cst{b}\bigr)
+  \ \wedge\ \code{VC}(c,\, I \wedge k < f).
+\end{array}}
+\]
+Reading top to bottom: the body preserves the invariant and \emph{increases} the
+variant $f$ (a progress measure climbing toward the bound $N$, dual to the kernel
+rule's decreasing variant) while costing at most $t(k)$; a false guard under the
+invariant yields the postcondition; the variant stays below $N$; the guard cost is
+the announced constant; and the body's own conditions hold.
+
+Soundness of the VCG requires the annotated command to be \emph{$\sum$-free}: the
+summation $\sum$ must not occur in any \emph{executable} expression of the program.
+An arithmetic expression is $\sum$-free when it is built without the $\sum$
+constructor, that is, from constants, variables, array accesses, and the arithmetic
+operators applied to $\sum$-free sub-expressions; a boolean expression is
+$\sum$-free when its comparisons relate $\sum$-free arithmetic expressions.
+Writing $\code{sf}(\cdot)$ for this predicate on arithmetic expressions, boolean
+expressions, and commands, $\sum$-freeness of a command $c$ is defined structurally
+by
+\[
+\inferrule*[right=\textsc{SF-Skip}]{\;}{\code{sf}(\code{skip})}
+\qquad
+\inferrule*[right=\textsc{SF-Assign}]{\code{sf}(a)}{\code{sf}(x := a)}
+\qquad
+\inferrule*[right=\textsc{SF-ArrAssign}]
+{\code{sf}(a_1) \\ \code{sf}(a_2)}{\code{sf}(x[a_1] := a_2)}
+\]
+\[
+\inferrule*[right=\textsc{SF-Seq}]
+{\code{sf}(c_1) \\ \code{sf}(c_2)}{\code{sf}(c_1; c_2)}
+\qquad
+\inferrule*[right=\textsc{SF-If}]
+{\code{sf}(b) \\ \code{sf}(c_1) \\ \code{sf}(c_2)}
+{\code{sf}(\code{if}\;b\;\code{then}\;c_1\;\code{else}\;c_2)}
+\]
+\[
+\inferrule*[right=\textsc{SF-While}]
+{\code{sf}(b) \\ \code{sf}(c)}
+{\code{sf}(\code{while}\;b\;[I,f,N,t,\cst{b}]\;\code{do}\;c)}
+\]
+Only the executable parts are constrained: the loop annotation
+$(I, f, N, t, \cst{b})$ is left unrestricted, so $\sum$ may still appear freely in
+assertions and in the annotations, which is exactly where it is needed.
+
+\begin{theorem}[\code{vcg\_sound}, Theorem~1 of~\cite{Silva2022}]\label{thm:vcg}
+If $c$ is $\sum$-free and every condition in $\code{VC}(c, Q)$ holds, then the
+triple $\triple{\code{wpc}(c,Q)_1}{S}{Q}{\code{wpc}(c,Q)_2}$, where $S$ is the
+program underlying $c$, is derivable and hence valid.
+\end{theorem}
+The $\sum$-freeness hypothesis makes every expression-evaluation cost constant,
+which the compositional \code{seq} rule needs (Section~\ref{sec:background}); it
+holds of every real program, since $\sum$ occurs only in assertions and
+annotations.
+
+\subsection{Trusted Base and Axioms}\label{sec:axioms}
+
+The development rests on exactly three axioms, all part of \Lean{}'s logic and
+inherited by anything built on Mathlib, none of them an assumption we chose to
+add: \emph{propositional extensionality} (\code{propext}), \emph{quotient
+soundness} (\code{Quot.sound}), and \emph{choice} (\code{Classical.choice}).
+Here we make precise \emph{where} each one is actually needed.
+Checking that a proof uses these and nothing more (via \code{\#print axioms}) is
+the standard way to certify that a \Lean{} development is free of hidden gaps.
+
+Quotient soundness (\code{Quot.sound}) enters through two channels.
+First, the cost that the VCG computes for a \code{while} loop is a
+\emph{finite sum} $\sum_{i < N} t(i)$ over $\code{Finset.range}\;N$, and
+\code{Finset} is a quotient of \code{Multiset}, itself a quotient of
+\code{List}; so every manipulation of these sums, such as the
+$\code{Finset.sum\_const}$ and $\code{Finset.card\_range}$ steps that close the
+division example, rests on \code{Quot.sound}.
+Second, function extensionality (\code{funext}), which we use whenever two cost
+terms of type $\State \to \Nat$ are proved equal, is itself derived from
+\code{Quot.sound} in \Lean{}'s kernel.
+
+Propositional extensionality (\code{propext}) is unavoidable because assertions
+are shallow, $\code{Assn} = \State \to \code{Prop}$.
+Every rewriting step that replaces a proposition by a logically equivalent one,
+which is what the pervasive \code{simp} and \code{rw} calls in the rule and
+example proofs do, turns an $\leftrightarrow$ into an $=$ and therefore invokes
+\code{propext}; it also underlies \code{funext} at \code{Prop}-valued functions
+and many of the reused Mathlib order and arithmetic lemmas.
+
+Choice (\code{Classical.choice}) is needed most visibly by the completeness
+proof of Theorem~\ref{thm:complete}.
+Turning an arbitrary valid triple into a derivation proceeds by case analysis on
+whether a given state satisfies the precondition (a \code{by\_cases}
+on $P\,\State$
+in the \code{of\_pointwise} lemma), and since $P\,\State$ is an arbitrary,
+undecidable proposition this excluded-middle step exists only classically.
+The same classical footing is what the Mathlib automation (\code{omega} and the
+order and arithmetic lemmas over $\Nat$ and $\Int$) already assumes.
+
+By contrast, the lower layers, such as determinism of the semantics
+and the soundness theorems, are constructive in
+spirit; the axioms surface in them only because they, too, import Mathlib.
+The point of reporting exactly these three is thus not that every proof needs
+all of them, but that the development introduces no axiom beyond Mathlib's own.
+
+\section{Two Corrections to the Original Formulation}\label{sec:deviations}
+
+Mechanization turned two informal steps of the dissertation~\cite{Silva2022} into failed proof
+obligations, each revealing a genuine error. Both had to be fixed for the
+corresponding soundness results to hold.
+
+\paragraph{The \code{while} rule is off by one.}
+The oracle rule for \code{while} (Fig.~4.8) reads, in our notation,
+\[
+{\small
+\inferrule*[right=\textsc{While-4.8}]
+{ \forall k.\ \triple{I \wedge b \wedge f = k}{S}{I}{t(k)}
+  \\ I \wedge b \Rightarrow f \le N }
+{ \triple{I}{\code{while}\;b\;\code{do}\;S}{I \wedge \neg b}
+  {\textstyle\sum_{i=0}^{N-1} t(i) + (N+1)\cdot\tbcost{b}} }
+}
+\]
+where $f$ is the variant, $N$ its announced bound, and $t(k)$ the cost of the body
+on the iteration at which $f = k$.
+The side condition $f \le N$ admits entry states with $f = 0, 1, \ldots, N$, that
+is, up to $N+1$ iterations, whereas the charged cost sums only $N$ body executions
+($i$ ranging from $0$ to $N-1$) alongside $N+1$ guard tests.
+The honest cost of $N+1$ iterations is $\sum_{i=0}^{N} t(i) + (N+2)\cdot\tbcost{b}$,
+one body cost and one guard test more; the rule as written therefore charges too
+little and is \emph{unsound}. Indeed the dissertation's own soundness proof
+(p.~26) derives this larger bound, not the one the rule concludes.
+The fix is to make the bound \emph{strict}, replacing $f \le N$ by
+$I \wedge b \Rightarrow f < N$, so that at most $N$ iterations occur and the
+announced cost is exactly right.
+Our \code{while} rule (Section~\ref{sec:logic}) bakes this in through the
+strict decrease $f < k$, and the corrected Fig.~4.8 rule is derived from it.
+
+\paragraph{The primitive \code{for} contradicts its own cost rule.}
+The exact-cost fragment of Chapter~6, which the artifact mechanizes, replaces
+\code{while} by a bounded \code{for} loop whose big-step semantics (Fig.~6.1)
+advances by incrementing the \emph{lower bound}:
+\[
+{\small
+\inferrule*[right=\textsc{For-6.1}]
+{ \aval{a}\State < \aval{b}\State
+  \\ \evals{S}{\upd{\State}{i}{\aval{a}\State}}{t}{\State'}
+  \\ \evals{\code{for}\;i = a{+}1\;\code{to}\;b\;\code{do}\;S}{\State'}{t'}{\State''} }
+{ \evals{\code{for}\;i = a\;\code{to}\;b\;\code{do}\;S}{\State}
+  {\tacost{a} + t + t'}{\State''} }
+}
+\]
+After $k$ unfoldings the lower bound is the expression $a + 1 + \cdots + 1$ with
+$k$ summands, so the cost $\tacost{a + 1 + \cdots + 1} = \tacost{a} +
+k\cdot(\cst{cst} + \cst{+})$ it charges to reach the counter \emph{grows} with $k$.
+The exact-cost rule for this loop (Fig.~6.2), however, charges a \emph{fixed}
+per-iteration expression cost $\tacost{a}$, so the chapter's central exact-cost
+result does not hold of the very semantics it is stated over.
+We resolve this by making \code{for} syntactic sugar, with the counter kept in the
+state,
+\[
+\code{for}\;i = a\;\code{to}\;b\;\code{do}\;S \;\triangleq\;
+i := a;\ \code{while}\;i < b\;\code{do}\;(S;\ i := i+1),
+\]
+so that each iteration reads $i$ at the constant cost $\cst{var}$ and the
+exact-cost accounting becomes faithful. A side effect is that the concrete
+constants of some examples shift; each mechanized example states the bound it
+actually proves.
+
+\section{Asymptotic Cost Assertions}\label{sec:asymptotic}
+
+The dissertation deliberately avoids asymptotic notation: its stated advantage
+over prior order-of-magnitude systems is that it delivers \emph{concrete} costs,
+which are strictly more informative than a $\BigO$ class.
+Asymptotic assertions are nonetheless the vocabulary in which algorithmic
+complexity is usually communicated, and they are often all one needs.
+We therefore add them as an extension, taking care that they arise as
+\emph{derivable weakenings} of the concrete bounds and never replace them.
+
+\subsection{An Elementary Formalization of $\BigO$, $\BigOm$, $\BigTh$}
+
+We adopt the textbook definitions of complexity classes over functions
+$f, g : \Nat \to \Nat$, kept entirely within $\Nat$ so that the example proofs
+stay elementary and avoid the normed-space and filter machinery of the general
+Mathlib \code{IsBigO}:
+\[
+f \in \BigO(g) \;\triangleq\;
+\exists\,c\,n_0.\; 0 < c \wedge \forall n \ge n_0.\; f\,n \le
+c \cdot g\,n,
+\]
+with $f \in \BigOm(g) \triangleq g \in \BigO(f)$ and
+$f \in \BigTh(g) \triangleq f \in \BigO(g) \wedge f \in \BigOm(g)$.
+Two facts suffice for the examples: any $\lambda n.\,a\cdot n + b$ with $a > 0$ is
+in $\BigO(n)$ (witness $c = a+b$, $n_0 = 1$), and any
+$\lambda n.\,a\cdot\log_2 n + b$ with $a > 0$ is in $\BigO(\log n)$ (threshold
+$n_0 = 2$, where $\log_2 n \ge 1$).
+
+To make the mechanized text read as in a textbook, each class is additionally
+realized as the \emph{set} of functions satisfying the predicate above (\Lean{}
+\code{bigO} and its $\BigOm$/$\BigTh$ analogues), equipped with scoped notations
+$\BigO(g)$, $\BigOm(g)$, $\BigTh(g)$.
+An asymptotic assertion is then literally a membership $f \in
+\BigO(g)$, which the
+lemma \code{mem\_bigO} unfolds to the predicate above by reflexivity, so the
+notation carries no proof overhead.
+All the statements below use this membership form.
+
+\subsection{Lifting Asymptotics to Triples}
+
+An assertion that a \emph{number} is $\BigO(g)$ says little about a program.
+To state that a \emph{program runs in} $\BigO(g)$ time, we index a family of
+pre- and post-conditions by the size $n \in \Nat$ of the input and require a
+single cost bound $T : \Nat \to \Nat$, itself in $\BigO(g)$, that is valid at
+every size:
+\[
+\begin{array}{l}
+\code{BigOValid}\;C\;P\;S\;Q\;g \;\triangleq\;
+\exists\,T : \Nat \to \Nat.\;\\
+\qquad T \in \BigO(g) \;\wedge\;
+\forall n.\; \Valid\;\triple{P\,n}{S}{Q\,n}{\lambda\_. \,T\,n}.
+\end{array}
+\]
+Reusing the triple notation with the complexity class placed where a concrete
+cost term would sit, we abbreviate this predicate as
+\[
+\Valid\;\triple{P}{S}{Q}{\BigO(g)}
+\qquad\text{for}\qquad
+\code{BigOValid}\;C\;P\;S\;Q\;g,
+\]
+where $P, Q : \Nat \to \code{Assn}$ are the size-indexed families and, as in
+Section~\ref{sec:logic}, the fixed cost model $C$ is left implicit.
+A program is thus certified to run in $\BigO(g)$ time exactly when the cost bound
+proved for it, read as a function of the input size $n$, lies in $\BigO(g)$: a
+derivable weakening of the concrete bound, obtained without leaving the
+upper-bound logic.
+
+\section{Examples}\label{sec:examples}
+
+\subsection{Division: an $\BigO(n)$ Upper Bound}
+
+The first example is the classic Euclidean-style division algorithm, which
+computes the quotient $q$ and remainder $r$ of $n$ by $m$ by repeated
+subtraction:
+\[
+\begin{array}{l}
+\{\,r = n \wedge q = 0 \wedge m > 0 \wedge n \ge 0\,\}\\
+\quad \code{while}\;m \le r\;\code{do}\;(r := r -
+m;\; q := q + 1)\\
+\{\,n = r + m\cdot q \wedge r < m \mid 20n + 5\,\}
+\end{array}
+\]
+Running the VCG on the annotated program, with invariant
+$I \equiv n = q\cdot m + r \wedge m > 0 \wedge r \ge 0$, variant $f
+\equiv n - r$,
+and iteration bound $N \equiv n$, produces all discharged side conditions and a
+computed cost of $13n + 3$ under the unit model, which is weakened to the
+announced $20n + 5$.
+
+\begin{theorem}[\code{division\_valid}]
+For every initial dividend $n$, the division triple above is valid:
+$\Valid\;\triple{P}{S}{Q}{\lambda\_. \,20n + 5}$.
+\end{theorem}
+The linear bound $20n + 5$ is in $\BigO(n)$, so the concrete result lifts
+directly.
+
+\begin{corollary}[\code{division\_bigO}]
+The division algorithm runs in $\BigO(n)$ steps:
+\[ \Valid\;\triple{P}{S}{Q}{\BigO(\lambda n.\,n)}. \]
+\end{corollary}
+
+\subsection{Binary Search: an $\BigO(\log n)$ Bound}
+
+The second example is the logarithmic loop at the heart of binary search:
+repeated halving of a value until it reaches one.
+\[
+\begin{array}{l}
+\{\,m = n \wedge n \ge 0\,\}\\
+\quad \code{while}\;m > 1\;\code{do}\;m := m / 2\\
+\{\,m \le 1 \mid 7\log_2 n + 5\,\}
+\end{array}
+\]
+Each iteration halves $m$, so the loop runs $\lfloor\log_2 n\rfloor$
+times: this is
+the very iteration profile that makes binary search logarithmic,
+isolated from the
+array lookup.
+What makes the mechanization interesting is the \emph{variant}.
+Running the VCG with invariant $I \equiv 0 \le m \le n$, variant
+$f \equiv \log_2 n - \log_2 m$, and iteration bound $N \equiv \log_2
+n$, the crucial
+side condition is that $f$ strictly increases on every iteration.
+It does, and by exactly one, because dividing by the base drops the integer
+logarithm by one, $\log_2(m / 2) = \log_2 m - 1$ (the Mathlib lemma
+$\code{Nat.log\_div\_base}$).
+The variant therefore reaches its bound $\log_2 n$ in $\log_2 n$
+steps even though
+it is measured against a value $m$ that shrinks \emph{geometrically}, so the
+$\sum_{i < N}$ that the VCG charges runs over only $\log_2 n$ iterations.
+The computed cost under the unit model is $7\log_2 n + 3$, weakened
+to the announced
+$7\log_2 n + 5$.
+
+\begin{theorem}[\code{halving\_valid}]
+For every initial value $n$, the loop terminates with $m \le 1$ and costs at
+most $7\log_2 n + 5$:
+$\Valid\;\triple{P}{S}{Q}{\lambda\_. \,7\log_2 n + 5}$.
+\end{theorem}
+Indexing the input by its size $n \in \Nat$, the bound $7\log_2 n + 5$ is in
+$\BigO(\log n)$ (the elementary lemma $\code{isBigO\_log}$), so the
+concrete result
+lifts directly.
+
+\begin{corollary}[\code{halving\_bigO}]
+Repeated halving runs in $\BigO(\log n)$ steps:
+\[ \Valid\;\triple{P}{S}{Q}{\BigO(\lambda n.\,\log_2 n)}. \]
+\end{corollary}
+Where the division bound comes from a variant that decreases by one against a
+value shrinking arithmetically, the logarithmic iteration count here
+comes from a
+variant that advances by one against a geometric decrease; the asymptotic layer
+records the difference as an $\BigO(\log n)$ class.
+
+\section{Related Work}\label{sec:related}
+
+\paragraph{Program logics for cost.}
+Attaching a resource to a Hoare triple $\triple{P}{S}{Q}{t}$ extends the partial
+correctness of Hoare~\cite{Hoare1969} with a quantitative component, an idea that
+goes back to the earliest work on reasoning about execution time.
+Nielson~\cite{Nielson1987} gives a Hoare-like system that certifies the
+\emph{order of magnitude} of the worst-case time; it is compositional and clean,
+but, as the dissertation we mechanize stresses, an order-of-magnitude judgement
+cannot express the concrete, constant-factor bounds that a cost dictionary yields
+and that our examples state.
+Carbonneaux et al.~\cite{CarbonneauxHoffmannShao2015} pair a quantitative Hoare
+logic with an abstract-interpretation front end that \emph{infers} compositional
+polynomial resource bounds for imperative code, and certify the whole pipeline in
+Rocq.
+Haslbeck and Nipkow~\cite{HaslbeckNipkow2018} carry out a comparative
+meta-theoretic study of three styles of time-bound Hoare logic (a Nielson-style
+system, a big-step system, and one based on time credits), relating their
+soundness and relative-completeness proofs; our kernel sits closest to their
+big-step reading, but carries a parametric cost model and a machine-checked
+completeness proof.
+The immediate ancestor of Silva's logic is the EasyCrypt cost
+logic~\cite{Barbosa2021}, whose triples bound the running time of adversaries so
+that concrete-security reductions can be discharged in the same prover as the
+functional proof.
+Relational versions of such logics, which bound the cost \emph{difference} between
+two runs rather than a single run, have also been
+developed~\cite{Cicek2017}, a direction orthogonal to the single-program bounds we
+treat.
+What our mechanization adds to this line is a fully machine-checked metatheory for
+Silva's logic, including a relative-completeness result the source text leaves
+open.
+
+\paragraph{Type-based and automatic resource analysis.}
+A complementary line replaces proof obligations with a type discipline that
+\emph{infers} bounds.
+Crary and Weirich~\cite{CraryWeirich2000} certify resource bounds through a type
+system with explicit resource witnesses, and Hofmann and
+Jost~\cite{HofmannJost2003} introduce the amortized potential-as-type technique,
+assigning potential to data, that underlies automatic amortized resource analysis.
+Resource Aware ML~\cite{Hoffmann2012,HoffmannDasWeng2017} turns that technique into
+an inference engine, reducing the search for polynomial (and later also
+exponential and logarithmic) bounds to linear programming over potential
+annotations, and TiML~\cite{Wang2017} attaches time annotations to ML types that an
+SMT backend discharges.
+A lighter-weight variant embeds the accounting in the host language: Danielsson's
+thunk monad~\cite{Danielsson2008} tracks the amortized cost of purely functional
+data structures inside Agda's type checker.
+On the real-time side, the survey of Wilhelm et al.~\cite{Wilhelm2008} maps the
+worst-case execution-time tool landscape that motivates verified timing guarantees
+in the first place.
+These approaches favour automation and inferred, often asymptotic, bounds; our work
+sits at the opposite end, trading automation for interactive proofs of concrete
+bounds backed by a machine-checked metatheory.
+
+\paragraph{Mechanized cost verification.}
+The potential method for amortized analysis is due to Tarjan~\cite{Tarjan1985}.
+Nipkow~\cite{Nipkow2015} mechanizes the amortized complexity of a suite of
+functional data structures in Isabelle/HOL, and Atkey~\cite{Atkey2010} embeds
+amortized resource analysis in separation logic through \emph{time credits}, a
+resource that each computation step consumes.
+Chargu\'eraud and Pottier~\cite{ChargueraudPottier2019} scale time credits in CFML
+to a machine-checked \emph{inverse-Ackermann} bound for union-find, and M\'evel et
+al.~\cite{MevelJourdanPottier2019} add time \emph{receipts} to Iris, dualising
+credits so that lower bounds, and not only upper bounds, become provable.
+Beyond data structures, concrete algorithmic results have been fully verified: van
+der Weegen and McKinna~\cite{vanderWeegenMcKinna2008} machine-check the average-case
+$\BigO(n\log n)$ bound of quicksort in Rocq.
+These developments verify the cost of individual programs or structures; our focus
+is instead the metatheory of a cost logic, the soundness and relative completeness
+of the rules on top of which such examples are discharged.
+
+\paragraph{Asymptotic complexity in proof assistants.}
+Gu\'eneau et al.~\cite{Gueneau2018} make $\BigO$ a first-class object in Rocq,
+modelling it as a domination relation between functions along a filter so that
+multivariate asymptotics and the composition of $\BigO$ facts across a program
+stay sound, on top of CFML time credits.
+Zhan and Haslbeck~\cite{ZhanHaslbeck2018} verify asymptotic time complexity of
+imperative programs in Isabelle by combining a refinement framework with an
+Akra--Bazzi library, reaching divide-and-conquer algorithms such as merge sort and
+Karatsuba multiplication.
+McCarthy et al.~\cite{McCarthy2018} instead thread running time through a monad in
+Rocq, so that a program's cost becomes part of its type and accumulates as it runs.
+These works build general asymptotic infrastructure and treat $\BigO$ as the
+primary specification.
+Our asymptotic layer is deliberately lightweight and plays the opposite role: the
+underlying logic proves concrete bounds, and the $\BigO$ assertions are thin,
+derivable consequences that recover the familiar vocabulary without weakening what
+was proved, which is why elementary $\Nat$-only definitions of the classes suffice
+for the examples.
+
+\paragraph{Mechanization in \Lean{} and relative completeness.}
+\Lean{}~\cite{Moura2021} serves as both a dependently typed functional language and
+an interactive prover, and its library Mathlib~\cite{Mathlib2020} supplies the
+arithmetic, order theory, and, for the logarithmic example, the $\code{Nat.log}$
+lemmas the cost proofs rely on.
+The shallow embedding of assertions we adopt is a standard mechanization technique
+that trades a fixed syntactic assertion language for the direct expressiveness of
+the metalogic.
+This is precisely what lets our completeness argument dispense with the
+expressiveness hypothesis that Cook's classic relative-completeness
+result~\cite{Cook1978} must assume: the strongest postcondition and the exact
+run-cost of a loop are already \Lean{} predicates, so no arithmetization is needed
+to name them (Section~\ref{sec:logic}).
+
+\section{Conclusion}\label{sec:conclusion}
+
+We have presented a \Lean{} mechanization of the upper-bound fragment of Silva's
+resource-aware Hoare logic (a cost-instrumented semantics, the cost logic with
+soundness, a new relative-completeness result, and its verification condition
+generator), together with the correction of an unsoundness uncovered during
+mechanization.
+On top of this base we built an elementary theory of asymptotic cost assertions
+and lifted it to the level of triples, so that a program can be certified to run
+in $\BigO(g)$ time as a derivable weakening of a concrete bound.
+Two examples exercise the framework: a division algorithm in $\BigO(n)$ and the
+halving loop of binary search in $\BigO(\log n)$, the latter obtained from a
+variant that advances by one against a geometrically shrinking value.
+
+As future work, we plan to: (a)~bring the amortized and exact-cost fragments of
+the dissertation, which the artifact already mechanizes, into the same uniform
+account; (b)~complete the VCG completeness result
+(Theorem~2 of~\cite{Silva2022}), which requires synthesizing loop annotations
+from valid triples; and (c)~extend the asymptotic layer to multivariate and
+super-linear classes (e.g.\ $\BigO(n^2)$) and connect it to
+Mathlib's \code{Asymptotics.IsBigO}.
+
+\subsubsection{Artifact Availability.}
+The complete \Lean{} source of the formalization, including the asymptotic
+extension and both examples, is available in a public repository~\cite{repo-logic}.
+Beyond the upper-bound logic presented here, it also mechanizes the
+amortized and exact-cost fragments of the dissertation, with their verification
+condition generators.
+The development builds against Lean~4.32.0 and Mathlib v4.32.0, and every
+theorem depends only on the axioms \code{propext}, \code{Classical.choice}, and
+\code{Quot.sound}.
+
+\bibliographystyle{splncs04}
+\bibliography{references}
+
+\appendix
+
+\section{Proof Sketches}\label{sec:appendix}
+
+This appendix expands the metatheoretic results of
+Sections~\ref{sec:background}--\ref{sec:examples} into proof sketches that follow
+the mechanized \Lean{} arguments. Each sketch names the tactics or lemmas that
+carry the load, so a reader can locate the corresponding step in the artifact.
+
+\paragraph{Lemma~\ref{lem:det} (determinism).}
+\emph{If $\evals{S}{\State}{t_1}{\State_1}$ and
+$\evals{S}{\State}{t_2}{\State_2}$, then $t_1 = t_2$ and
+$\State_1 = \State_2$.}
+
+\begin{proof}
+The proof is by induction on the first derivation $\evals{S}{\State}{t_1}{\State_1}$,
+generalizing the cost $t_2$ and state $\State_2$ of the second, which is then
+inverted by case analysis. When both derivations use the same rule, the induction
+hypotheses equate the costs and states of the sub-runs and reflexivity closes the
+goal; when they use different rules for the same command, the guard value
+disagrees, since $\bval{b}\State$ cannot be simultaneously \code{true} and
+\code{false}, so the case is vacuous. Only the two \code{if} and two \code{while}
+constructors produce such mixed cases, all discharged by \code{simp\_all}. The cost
+and state projections (\code{cost\_unique}, \code{state\_unique}) are immediate
+corollaries.\qed
+\end{proof}
+
+\paragraph{Theorem~\ref{thm:sound} (soundness).}
+\emph{If $\vdash \triple{P}{S}{Q}{T}$ then $\Valid\;\triple{P}{S}{Q}{T}$.}
+
+\begin{proof}
+By induction on the derivation of $\vdash \triple{P}{S}{Q}{T}$, unfolding validity
+to produce, for each initial state, a terminating run whose cost meets the bound.
+The atomic rules \textsc{Skip}, \textsc{Assign}, and \textsc{Array-Assign} each
+exhibit the matching \code{Eval} constructor, with the charged cost equal to the
+run's cost. \textsc{Seq} composes the two runs from the induction hypotheses; the
+first sub-triple carries the extra conjunct $T_2 \le n$ into its postcondition,
+which lets \code{omega} verify $t_1 + t_2 \le T_1\,\State + n$. \textsc{If}
+branches on $\bval{b}\State$; the taken branch supplies the run, and
+$t \le \max(T_1,T_2)$ together with the guard cost closes the bound. The
+\code{while} case is the crux: after fixing the entry state and abbreviating
+$k = f\,\State$, the proof proceeds by \emph{strong induction} on $k$. If the guard
+is false, the exit premise gives $\tbcost{b}\State \le E\,\State$ and the
+\textsc{While-F} run; if it is true, the body premise yields one iteration that
+strictly decreases the variant ($f\,\State_1 < k$), preserves the invariant, and
+respects the budget $E\,\State_1 + c \le n$, after which the strong induction
+hypothesis handles the shorter remaining loop and \code{omega} sums the three cost
+contributions within $E$. \textsc{Consequence} and the existential-precondition
+rule are routine.\qed
+\end{proof}
+
+\paragraph{Theorem~\ref{thm:complete} (relative completeness).}
+\emph{If $\Valid\;\triple{P}{S}{Q}{T}$ then $\vdash \triple{P}{S}{Q}{T}$.}
+
+\begin{proof}
+The argument, outlined after the theorem statement in Section~\ref{sec:logic},
+runs as follows in the artifact. Using classical choice, the exact resource of a
+run and the number of loop iterations are reified as functions \code{runCost} and
+\code{steps}, well-defined because determinism (Lemma~\ref{lem:det}) and the
+auxiliary \code{WhileSteps.unique} make the underlying data unique. The core is a
+pointwise lemma \code{complete\_singleton}: given a concrete run
+$\evals{S}{\State_0}{t}{\State'}$ with $Q\,\State'$, the triple
+$\triple{\State = \State_0}{S}{Q}{\lambda\_.\,t}$ is derivable, by induction on
+$S$. The atomic and structural cases mirror the semantics; the \code{while} case
+instantiates the kernel rule with the strongest-postcondition invariant
+$I \triangleq \lambda\State.\ \exists\,tt\,\State_f.\
+\evals{\code{while}\;b\;\code{do}\;S}{\State}{tt}{\State_f} \wedge Q\,\State_f$,
+variant $f \triangleq \code{steps}$, and remaining cost $E \triangleq \code{runCost}$,
+all of which are already \Lean{} predicates and functions, so no assertion needs to
+be arithmetized. This is exactly where the shallow embedding removes Cook's
+expressiveness hypothesis. Finally, \code{complete} takes a valid triple, extracts
+for each $\State_0 \vDash P$ its unique run (validity together with determinism),
+applies \code{complete\_singleton}, weakens the exact cost to $T$, and reassembles
+the pointwise family through the existential-precondition rule
+(\code{of\_pointwise}). Choice is used precisely twice: in defining
+\code{runCost}/\code{steps}, and in the classical \code{by\_cases} on
+$P\,\State_0$ inside \code{of\_pointwise}.\qed
+\end{proof}
+
+\paragraph{Theorem~\ref{thm:vcg} (VCG soundness).}
+\emph{If $c$ is $\sum$-free and every condition in $\code{VC}(c, Q)$ holds, then
+the triple $\triple{\code{wpc}(c,Q)_1}{S}{Q}{\code{wpc}(c,Q)_2}$, where $S$ is the
+program underlying $c$, is derivable and hence valid.}
+
+\begin{proof}
+The theorem factors through a key lemma \code{wpc\_sound}: if $c$ is $\sum$-free
+and $\code{VC}(c,Q)$ holds, then
+$\vdash \triple{\code{wpc}(c,Q)_1}{\code{strip}(c)}{Q}{\code{wpc}(c,Q)_2}$,
+proved by induction on the $\sum$-freeness derivation of $c$. The atomic cases
+apply the matching kernel rule. The \code{seq} case needs the second component's
+cost to be state-independent, so that the compositional \textsc{Seq} rule can take
+a constant $n$; this is the separate lemma \code{wpc\_cost\_const}, itself proved by
+induction from the constancy of $\tacost{\cdot}$ and $\tbcost{\cdot}$ on
+$\sum$-free expressions (\code{tacost\_const}, \code{tbcost\_const}), which is the
+sole place the $\sum$-freeness hypothesis is consumed. The \code{if} case applies
+the kernel \textsc{If} rule, its two branch preconditions coming from the
+guard-indexed conjuncts of \code{wpc}. The \code{while} case instantiates the
+derived thesis-form loop rule with the annotation $(I,f,N,t,\cst{b})$: the body
+verification condition provides the per-iteration triple together with the cost
+bound ${}\le t(k)$, and the variant-bound and guard-cost conditions supply the
+remaining premises, so the charged cost
+$\sum_{i<N} t(i) + (N+1)\cdot\cst{b}$ is met exactly. \code{vcg\_sound} then chains
+\code{wpc\_sound} with the two outer components of $\code{VCG}$, namely the
+entailment $P \Rightarrow \code{wpc}(c,Q)_1$ and the cost weakening
+$\code{wpc}(c,Q)_2 \le T$, through the consequence rule.\qed
+\end{proof}
+
+\paragraph{The division example (\code{division\_valid}, \code{division\_bigO}).}
+\emph{For every initial dividend $n$,
+$\Valid\;\triple{r = n \wedge q = 0 \wedge m > 0 \wedge n \ge 0}
+{\code{while}\;m \le r\;\code{do}\;(r := r - m;\ q := q + 1)}
+{n = r + m\cdot q \wedge r < m}{\lambda\_.\,20n + 5}$;
+and, as a corollary, $\Valid\;\triple{P}{S}{Q}{\BigO(\lambda n.\,n)}$.}
+
+\begin{proof}
+The concrete triple is obtained by applying \code{vcg\_sound}, through its validity
+corollary, to a discharged \code{VCG} obligation, so the work lies in checking the
+finitely many side conditions. With invariant
+$I \equiv n = q\cdot m + r \wedge m>0 \wedge r\ge 0$, variant $f \equiv n - r$, and
+bound $N \equiv n$, the body condition unfolds \code{wpc} and the substitution and
+reduces to integer arithmetic closed by \code{omega} (using
+$(q{+}1)\cdot m = q\cdot m + m$); the computed cost
+$\sum_{i<n} 10 + (n{+}1)\cdot 3 = 13n + 3$, evaluated with \code{Finset.sum\_const}
+and \code{Finset.card\_range}, is weakened to the stated $20n+5$. The asymptotic
+corollary instantiates \code{BigOValid} with the bound read as a function of the
+input size and transports the concrete validity across the $\Int$/$\Nat$ cast,
+using $\lambda n.\,20n+5 \in \BigO(n)$ (\code{isBigO\_linear}).\qed
+\end{proof}
+
+\paragraph{The halving example (\code{halving\_valid}, \code{halving\_bigO}).}
+\emph{For every initial value $n$,
+$\Valid\;\triple{m = n \wedge n \ge 0}{\code{while}\;m > 1\;\code{do}\;m := m/2}
+{m \le 1}{\lambda\_.\,7\log_2 n + 5}$;
+and, as a corollary, $\Valid\;\triple{P}{S}{Q}{\BigO(\lambda n.\,\log_2 n)}$.}
+
+\begin{proof}
+As in the division example, the concrete triple follows from \code{vcg\_sound}
+applied to a discharged \code{VCG} obligation. With invariant
+$I \equiv 0 \le m \le n$, variant $f \equiv \log_2 n - \log_2 m$, and bound
+$N \equiv \log_2 n$, the decisive body condition is that $f$ strictly increases; it
+does, by exactly one, because $\log_2(m/2) = \log_2 m - 1$
+(\code{Nat.log\_div\_base}), and \code{omega} closes the surrounding inequalities
+from the monotonicity and positivity facts about \code{Nat.log}; the computed cost
+$\sum_{i<\log_2 n} 4 + (\log_2 n {+} 1)\cdot 3 = 7\log_2 n + 3$ is weakened to
+$7\log_2 n + 5$. The asymptotic corollary lifts the bound as before, now via
+$\lambda n.\,7\log_2 n + 5 \in \BigO(\log n)$ (\code{isBigO\_log}).\qed
+\end{proof}
+
+\end{document}
