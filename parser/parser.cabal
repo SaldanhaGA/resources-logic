@@ -19,10 +19,11 @@ extra-source-files:  CHANGELOG.md
 
 executable parser
   main-is:             Main.hs
-  
+
   other-modules:
     Lexer.Lexer
     , Syntax.Syntax
+    , Parser.Parser
   
   build-tool-depends:  alex:alex 
   
@@ -30,6 +31,7 @@ executable parser
       base >=4.13 && <5
     , optparse-applicative
     , megaparsec
+    , parser-combinators
     , array
   
   hs-source-dirs:      app, src
