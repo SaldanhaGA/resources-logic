@@ -48,6 +48,7 @@ tokens :-
       <0> "!"           {simpleToken TNot}
       <0> "&&"          {simpleToken TAnd}
       <0> "||"          {simpleToken TOr}
+      <0> "|"           {simpleToken TPipe}
       <0> @identifier   {mkIdent}
 
 {
@@ -95,6 +96,7 @@ data Lexeme
   | TNot 
   | TAnd 
   | TOr
+  | TPipe
   | TTrue 
   | TFalse 
   | TSkip

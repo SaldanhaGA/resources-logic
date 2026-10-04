@@ -41,7 +41,7 @@ stmt = do
 
 stmtSingle :: Parser Stmt
 stmtSingle = choice
-  [ pBlock
+  [ try pBlock
   , pSkip
   , try pArrAssign
   , pAssign
@@ -195,7 +195,23 @@ bTable =
 
 -------------------------------------------------------------------------------
 
+pProg :: Parser Program
+pProg = do
+  matchLex TLBrace
+  pre <- bexp
+  matchLex TRBrace
+  
+  body <- stmt
+  
+  matchLex TLBrace
+  post <- bexp
+  matchLex TPipe
+  bound <- aexp
+  matchLex TRBrace
+  
+  return (Program pre body post bound)
+
 parseProgram :: String -> [Token] -> Either (ParseErrorBundle [Token] Void) Program
 parseProgram fileName tokens = runParser p fileName tokens
   where
-    p = Program <$> stmt <* matchLex TEOF
+    p = pProg <* matchLex TEOF

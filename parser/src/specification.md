@@ -1,12 +1,14 @@
 # Syntax Tree Definition (AST)
 
-This documentation describes the grammar of the programming language, divided into three main categories: **Statements (Stmt)**, **Arithmetic Expressions (AExp)**, and **Boolean Expressions (BExp)**.
+This documentation describes the grammar of the programming language, divided into four main categories: **Programs (Prog)**, **Statements (Stmt)**, **Arithmetic Expressions (AExp)**, and **Boolean Expressions (BExp)**.
 
 ## Grammar Overview
 
 Below is the formal grammar definition in BNF (Backus-Naur Form) format:
 
 ```
+Prog    -> '{' BExp '}' Stmt '{' BExp '|' AExp '}'
+
 Stmt    -> '{' Stmt '}'
         |  'skip' ';'
         |  Ident '=' AExp ';'
@@ -42,7 +44,15 @@ BExp    -> 'true'
 
 ## Rule Breakdown
 
-### 1. Statements (`Stmt`)
+### 1. Programs (`Prog`)
+
+Programs represent a complete execution block annotated with Hoare Logic specifications, used for formal verification and resource analysis.
+
+| Syntax | Description | 
+| ----- | ----- | 
+| `{ BExp } Stmt { BExp \| AExp }` | A Hoare Logic triple where the first `BExp` is the **precondition**, `Stmt` is the program to be executed, the second `BExp` is the **postcondition**, and `AExp` represents an additional quantitative measure (such as cost, resource bound, or a variant). | 
+
+### 2. Statements (`Stmt`)
 
 Statements define the execution flow and state-altering operations of the language.
 
@@ -58,7 +68,7 @@ Statements define the execution flow and state-altering operations of the langua
 | `while (BExp) Stmt` | Condition-based loop (executes while the condition is true). | 
 | `for (Ident = AExp to AExp) Stmt` | Loop with a delimited counter. | 
 
-### 2. Arithmetic Expressions (`AExp`)
+### 3. Arithmetic Expressions (`AExp`)
 
 Represent numeric values, variables, and mathematical operations.
 
@@ -74,7 +84,7 @@ Represent numeric values, variables, and mathematical operations.
 | `AExp ^ AExp` | Exponentiation. | 
 | `sum Ident from AExp to AExp in AExp` | Summation operation (Mathematical sum loop). | 
 
-### 3. Boolean Expressions (`BExp`)
+### 4. Boolean Expressions (`BExp`)
 
 Represent logical evaluations that result in `true` or `false`.
 
@@ -89,4 +99,4 @@ Represent logical evaluations that result in `true` or `false`.
 | `AExp >= AExp` | Greater than or equal to. | 
 | `! BExp` | Logical negation (NOT). | 
 | `BExp && BExp` | Logical conjunction (AND). | 
-| `BExp \|\| BExp` | Logical disjunction (OR). | 
+| `BExp \|\| BExp` | Logical disjunction (OR). |

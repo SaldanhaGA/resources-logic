@@ -2,8 +2,8 @@ module Syntax.Syntax where
 
 newtype Ident = Ident { unIdent :: String } deriving (Eq, Ord, Show)
 
-newtype Program
-  = Program {unProgram :: Stmt}
+data Program
+  = Program BExp Stmt BExp AExp
     deriving (Eq, Ord, Show)
 
 data Stmt
