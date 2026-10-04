@@ -8,7 +8,7 @@ Below is the formal grammar definition in BNF (Backus-Naur Form) format:
 
 ```
 Stmt    -> '{' Stmt '}'
-        |  skip ';'
+        |  'skip' ';'
         |  Ident '=' AExp ';'
         |  Ident '[' AExp ']' '=' AExp ';'
         |  Stmt ';' Stmt
