@@ -13,14 +13,23 @@ $alpha = [a-zA-Z]
 
 tokens :-
       <0> $white+       ;
-      
-      <0> @number       {mkNumber}
+
+      <0> "program"     {simpleToken TProgram}
+      <0> "size"        {simpleToken TSize}
+      <0> "inputs"      {simpleToken TInputs}
+      <0> "complexity"  {simpleToken TComplexity}
+
+      <0> "O"           {simpleToken TO}
+      <0> "log"         {simpleToken TLog}
+
       <0> "skip"        {simpleToken TSkip}
-      <0> "="           {simpleToken TAssign}
+      <0> ":="          {simpleToken TAssign}
       <0> "if"          {simpleToken TIf}
+      <0> "then"        {simpleToken TThen}
       <0> "else"        {simpleToken TElse}
       <0> "while"       {simpleToken TWhile}
-      <0> "for"         {simpleToken TFor}
+      <0> "do"          {simpleToken TDo}
+
       <0> ";"           {simpleToken TSemi}
       <0> "("           {simpleToken TLParen}
       <0> ")"           {simpleToken TRParen}
@@ -28,27 +37,28 @@ tokens :-
       <0> "}"           {simpleToken TRBrace}
       <0> "["           {simpleToken TLBracket}
       <0> "]"           {simpleToken TRBracket}
+
       <0> "+"           {simpleToken TPlus}
       <0> "-"           {simpleToken TMinus}
       <0> "*"           {simpleToken TTimes}
       <0> "/"           {simpleToken TDiv}
       <0> "^"           {simpleToken TPow}
       <0> "sum"         {simpleToken TSum}
-      <0> "from"        {simpleToken TFrom}
-      <0> "to"          {simpleToken TTo}
-      <0> "in"          {simpleToken TIn}
+
       <0> "true"        {simpleToken TTrue}
       <0> "false"       {simpleToken TFalse}
+
       <0> "=="          {simpleToken TEq}
       <0> "!="          {simpleToken TNe}
-      <0> "<"           {simpleToken TLt}
-      <0> ">"           {simpleToken TGt}
       <0> "<="          {simpleToken TLe}
       <0> ">="          {simpleToken TGe}
+      <0> "<"           {simpleToken TLt}
+      <0> ">"           {simpleToken TGt}
       <0> "!"           {simpleToken TNot}
       <0> "&&"          {simpleToken TAnd}
       <0> "||"          {simpleToken TOr}
-      <0> "|"           {simpleToken TPipe}
+
+      <0> @number       {mkNumber}
       <0> @identifier   {mkIdent}
 
 {
@@ -64,13 +74,30 @@ data Token
     } deriving (Eq, Ord, Show)
 
 data Lexeme    
+  -- Identificadores e Literais
   = TIdent String
   | TNumber Int
-  | TAssign 
+  | TTrue 
+  | TFalse 
+
+  -- Spec / Cabeçalho
+  | TProgram
+  | TSize
+  | TInputs
+  | TComplexity
+  | TO
+  | TLog
+
+  -- Comandos
+  | TSkip
+  | TAssign       -- :=
   | TIf 
+  | TThen
   | TElse 
   | TWhile 
-  | TFor
+  | TDo
+
+  -- Pontuação
   | TSemi 
   | TLParen 
   | TRParen 
@@ -78,15 +105,16 @@ data Lexeme
   | TRBrace 
   | TLBracket 
   | TRBracket 
+
+  -- AExp
   | TPlus 
-  | TTimes 
   | TMinus 
+  | TTimes 
   | TDiv 
   | TPow
   | TSum
-  | TFrom
-  | TTo
-  | TIn
+
+  -- BExp
   | TEq 
   | TNe
   | TLt 
@@ -96,10 +124,7 @@ data Lexeme
   | TNot 
   | TAnd 
   | TOr
-  | TPipe
-  | TTrue 
-  | TFalse 
-  | TSkip
+
   | TEOF
   deriving (Eq, Ord, Show)
 
