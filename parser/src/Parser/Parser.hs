@@ -12,11 +12,11 @@ type Parser = Parsec Void [Token]
 matchLex :: Lexeme -> Parser ()
 matchLex lx = satisfy (\(Token _ l) -> l == lx) *> pure ()
 
-pIdent :: Parser Ident
-pIdent = do
+pVar :: Parser Var
+pVar = do
   Token _ lexeme <- satisfy isIdent
   case lexeme of
-    TIdent s -> return (Ident s)
+    TIdent s -> return s
     _        -> empty
   where
     isIdent (Token _ (TIdent _)) = True
@@ -34,86 +34,117 @@ pNum = do
 
 -------------------------------------------------------------------------------
 
+pGrowth :: Parser Growth
+pGrowth = do
+  matchLex TO
+  matchLex TLParen
+  g <- choice
+    [ Const <$ matchLex (TNumber 1)
+    , try pNLogN
+    , try pExp
+    , try pPoly
+    , Log   <$ (matchLex TLog *> pVar)
+    , Lin   <$ pVar
+    ]
+  matchLex TRParen
+  return g
+  where
+    pNLogN = do
+      _ <- pVar
+      matchLex TLog
+      _ <- pVar
+      return NLogN
+
+    pExp = do
+      n <- pNum
+      if n == 2
+        then matchLex TPow *> pVar *> pure Exp
+        else empty
+
+    pPoly = do
+      _ <- pVar
+      matchLex TPow
+      k <- pNum
+      return (Poly k)
+
+-------------------------------------------------------------------------------
+
+pInputGen :: Parser InputGen
+pInputGen = do
+  v <- pVar
+  matchLex TAssign
+  e <- aexp
+  optional (matchLex TSemi)
+  return (GenAssign v e)
+
+pSpec :: Parser Spec
+pSpec = do
+  matchLex TProgram
+  name <- pVar
+  matchLex TSize
+  size <- pVar
+  matchLex TInputs
+  matchLex TLBrace
+  gens <- many pInputGen
+  matchLex TRBrace
+  matchLex TComplexity
+  growth <- pGrowth
+  return (Spec name size gens growth)
+
+-------------------------------------------------------------------------------
+
 stmt :: Parser Stmt
 stmt = do
-  stmts <- some stmtSingle
+  stmts <- sepBy1 stmtSingle (matchLex TSemi)
   return (foldr1 Seq stmts)
 
 stmtSingle :: Parser Stmt
 stmtSingle = choice
-  [ try pBlock
-  , pSkip
+  [ pSkip
   , try pArrAssign
   , pAssign
   , pIf
   , pWhile
-  , pFor
+  , between (matchLex TLBrace) (matchLex TRBrace) stmt
   ]
 
-pBlock :: Parser Stmt
-pBlock = do
-  matchLex TLBrace
-  stmts <- many stmtSingle
-  matchLex TRBrace
-  case stmts of
-    [] -> return Skip
-    _  -> return (foldr1 Seq stmts)
-
 pSkip :: Parser Stmt
-pSkip = Skip <$ (matchLex TSkip *> matchLex TSemi)
+pSkip = Skip <$ matchLex TSkip
 
 pAssign :: Parser Stmt
 pAssign = do
-  i <- pIdent
+  i <- pVar
   matchLex TAssign
   e <- aexp
-  matchLex TSemi
   return (Assign i e)
 
 pArrAssign :: Parser Stmt
 pArrAssign = do
-  i <- pIdent
+  i <- pVar
   matchLex TLBracket
   idx <- aexp
   matchLex TRBracket
   matchLex TAssign
   val <- aexp
-  matchLex TSemi
   return (ArrAssign i idx val)
 
 pIf :: Parser Stmt
 pIf = do
   matchLex TIf
-  matchLex TLParen
   cond <- bexp
-  matchLex TRParen
+  matchLex TThen
   thn <- stmtSingle
-  optEls <- optional (matchLex TElse *> stmtSingle)
-  case optEls of
-    Nothing  -> return (Ite cond thn Skip)
-    Just els -> return (Ite cond thn els)
+  matchLex TElse
+  els <- stmtSingle
+  return (If cond thn els)
 
 pWhile :: Parser Stmt
 pWhile = do
   matchLex TWhile
-  matchLex TLParen
   cond <- bexp
-  matchLex TRParen
+  matchLex TDo
   body <- stmtSingle
   return (While cond body)
-
-pFor :: Parser Stmt
-pFor = do
-  matchLex TFor
-  matchLex TLParen
-  i <- pIdent
-  matchLex TAssign
-  start <- aexp
-  matchLex TTo
-  end <- aexp
-  matchLex TRParen
-  body <- stmtSingle
-  return (mkFor i start end body)
 
 -------------------------------------------------------------------------------
 
@@ -123,31 +154,28 @@ aexp = makeExprParser aTerm aTable
 aTerm :: Parser AExp
 aTerm = choice
   [ Num <$> pNum
-  , pSumLoop
+  , pSum
   , try pArrAccess
-  , Var <$> pIdent
+  , Var <$> pVar
   , between (matchLex TLParen) (matchLex TRParen) aexp
   ]
 
 pArrAccess :: Parser AExp
 pArrAccess = do
-  i <- pIdent
+  i <- pVar
   matchLex TLBracket
   idx <- aexp
   matchLex TRBracket
-  return (Arr i idx)
+  return (ArrAccess i idx)
 
-pSumLoop :: Parser AExp
-pSumLoop = do
+pSum :: Parser AExp
+pSum = do
   matchLex TSum
-  i <- pIdent
-  matchLex TFrom
-  start <- aexp
-  matchLex TTo
-  end <- aexp
-  matchLex TIn
-  body <- aexp
-  return (Sum i start end body)
+  v <- pVar
+  start <- aTerm
+  end <- aTerm
+  body <- aTerm
+  return (Sum v start end body)
 
 aTable :: [[Operator Parser AExp]]
 aTable =
@@ -177,41 +205,28 @@ pComparison = do
   op <- choice
     [ Eq <$ matchLex TEq
     , Ne <$ matchLex TNe
-    , Lt <$ matchLex TLt
-    , Gt <$ matchLex TGt
     , Le <$ matchLex TLe
     , Ge <$ matchLex TGe
+    , Lt <$ matchLex TLt
+    , Gt <$ matchLex TGt
     ]
   a2 <- aexp
   return (op a1 a2)
 
 bTable :: [[Operator Parser BExp]]
 bTable =
-  [ [ Prefix (Neg <$ matchLex TNot) ]
+  [ [ Prefix (Not <$ matchLex TNot) ]
   , [ InfixL (And <$ matchLex TAnd) ]
-  , [ InfixL (Or <$ matchLex TOr) ]
+  , [ InfixL (Or  <$ matchLex TOr) ]
   ]
-
 
 -------------------------------------------------------------------------------
 
 pProg :: Parser Program
 pProg = do
-  matchLex TLBrace
-  pre <- bexp
-  matchLex TRBrace
-  
+  spec <- pSpec
   body <- stmt
-  
-  matchLex TLBrace
-  post <- bexp
-  matchLex TPipe
-  bound <- aexp
-  matchLex TRBrace
-  
-  return (Program pre body post bound)
+  return (Program spec body)
 
 parseProgram :: String -> [Token] -> Either (ParseErrorBundle [Token] Void) Program
-parseProgram fileName tokens = runParser p fileName tokens
-  where
-    p = pProg <* matchLex TEOF
+parseProgram fileName tokens = runParser (pProg <* matchLex TEOF) fileName tokens

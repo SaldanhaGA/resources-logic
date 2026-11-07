@@ -8,9 +8,9 @@ data Program
 
 data Spec
     = Spec {
-        progName :: String
-        sizeParam :: Var
-        inputGens :: [InputGen]
+        progName   :: String,
+        sizeParam  :: Var,
+        inputGens  :: [InputGen],
         complexity :: Growth
     } deriving (Eq, Show)
 
@@ -18,6 +18,7 @@ type Var = String
 
 data InputGen
     = GenAssign Var AExp
+    deriving (Eq, Show)
 
 data Growth
     = Const
@@ -37,18 +38,18 @@ data AExp
     | Mul AExp AExp
     | Div AExp AExp
     | Pow AExp AExp
-    | Sum Ident AExp AExp AExp
+    | Sum Var AExp AExp AExp
     deriving (Eq, Show)
 
 data BExp
     = BTrue
     | BFalse
     | Eq  AExp AExp
-    | Ne AExp AExp
+    | Ne  AExp AExp
     | Lt  AExp AExp
     | Gt  AExp AExp
-    | Le AExp AExp
-    | Ge AExp AExp
+    | Le  AExp AExp
+    | Ge  AExp AExp
     | And BExp BExp
     | Or  BExp BExp
     | Not BExp
