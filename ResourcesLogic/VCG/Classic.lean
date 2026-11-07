@@ -204,4 +204,30 @@ theorem vcg_valid {P : Assn} {c : ACom} {Q : Assn} {T : Cost}
     (hsf : c.SigmaFree) (h : VCG C P c Q T) : Valid C P (c.strip) Q T :=
   (vcg_sound hsf h).sound
 
+/-- Loop VC with a body annotation indexed by the iteration value `k`.
+In the shallow embedding the logical variable `k` bound by the loop VC is a
+Lean binder, so an inner annotation can only mention it if the body is a family
+`c k` of annotated commands sharing the same underlying program `S`. -/
+theorem vcg_while_indexed {b : BExp} {I : Assn} {f : State → Nat} {N cb : Nat}
+    {t : Nat → Nat} {c : Nat → ACom} {S : Stmt}
+    (hstrip : ∀ k, (c k).strip = S) (hsf : ∀ k, (c k).SigmaFree)
+    (hbody : ∀ k σ, I σ → bval b σ = true → f σ = k →
+      (wpc C (c k) (fun σ' => I σ' ∧ k < f σ')).1 σ ∧
+      (wpc C (c k) (fun σ' => I σ' ∧ k < f σ')).2 σ ≤ t k)
+    (hvc : ∀ k, VC C (c k) (fun σ' => I σ' ∧ k < f σ'))
+    (hN : ∀ σ, I σ → bval b σ = true → f σ < N)
+    (hcb : ∀ σ, I σ → tbcost C b σ = cb) :
+    Hoare C I (.while b S) (fun σ => I σ ∧ bval b σ = false)
+      (fun _ => (∑ i ∈ Finset.range N, t i) + (N + 1) * cb) := by
+  apply Hoare.while_thesis hcb hN
+  intro k
+  have hk := wpc_sound (hsf k) (fun σ' => I σ' ∧ k < f σ') (hvc k)
+  rw [hstrip k] at hk
+  apply Hoare.conseq hk
+  · rintro σ ⟨h1, h2, h3⟩
+    apply (hbody k σ h1 h2 h3).1
+  · intro _ h; assumption
+  · rintro σ ⟨h1, h2, h3⟩
+    apply (hbody k σ h1 h2 h3).2
+
 end ResourcesLogic

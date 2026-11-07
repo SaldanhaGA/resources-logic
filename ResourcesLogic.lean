@@ -10,6 +10,7 @@ import ResourcesLogic.Hoare.Completeness
 import ResourcesLogic.Hoare.Rules
 
 import ResourcesLogic.Hoare.Amortized
+import ResourcesLogic.Counterexample
 
 import ResourcesLogic.Exact.Hoare
 
@@ -21,3 +22,6 @@ import ResourcesLogic.Examples.Division
 import ResourcesLogic.Examples.RangeFilter
 import ResourcesLogic.Examples.QuadraticSum
 import ResourcesLogic.Examples.Halving
+import ResourcesLogic.Examples.Sequential
+import ResourcesLogic.Examples.Nested
+import ResourcesLogic.Examples.NLogN

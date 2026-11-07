@@ -88,6 +88,18 @@ theorem isBigTheta_log {a b : ℕ} (ha : 0 < a) :
   show Nat.log 2 n ≤ 1 * (a * Nat.log 2 n + b)
   omega
 
+theorem isBigO_nlog {a b c : ℕ} (ha : 0 < a) :
+    IsBigO (fun n => a * (n * Nat.log 2 n) + b * n + c) (fun n => n * Nat.log 2 n) := by
+  exists a + b + c, 2
+  constructor
+  · omega
+  intro n hn
+  have hlog : 1 ≤ Nat.log 2 n := Nat.log_pos (by norm_num) hn
+  have h1 : n ≤ n * Nat.log 2 n := Nat.le_mul_of_pos_right n hlog
+  have h2 : 1 ≤ n * Nat.log 2 n := le_trans (by omega) h1
+  show a * (n * Nat.log 2 n) + b * n + c ≤ (a + b + c) * (n * Nat.log 2 n)
+  nlinarith [h1, h2, Nat.zero_le b, Nat.zero_le c]
+
 theorem log_two_half (n : ℕ) : Nat.log 2 (n / 2) = Nat.log 2 n - 1 :=
   Nat.log_div_base 2 n
 
