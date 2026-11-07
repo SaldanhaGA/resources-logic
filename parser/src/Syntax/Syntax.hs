@@ -1,58 +1,64 @@
 module Syntax.Syntax where
 
-newtype Ident = Ident { unIdent :: String } deriving (Eq, Ord, Show)
-
 data Program
-  = Program BExp Stmt BExp AExp
-    deriving (Eq, Ord, Show)
+    = Program { 
+        progSpec :: Spec,
+        progBory :: Stmt
+    } deriving (Eq, Show)
 
-data Stmt
-    = Skip
-    | Assign Ident AExp
-    | ArrAssign Ident AExp AExp
-    | Seq Stmt Stmt
-    | Ite BExp Stmt Stmt
-    | While BExp Stmt
+data Spec
+    = Spec {
+        progName :: String
+        sizeParam :: Var
+        inputGens :: [InputGen]
+        complexity :: Growth
+    } deriving (Eq, Show)
+
+type Var = String
+
+data InputGen
+    = GenAssign Var AExp
+
+data Growth
+    = Const
+    | Log
+    | Lin
+    | NLogN
+    | Poly Int
+    | Exp
     deriving (Eq, Ord, Show)
 
 data AExp
     = Num Int
-    | Var Ident
-    | Arr Ident AExp
+    | Var Var
+    | ArrAccess Var AExp
     | Add AExp AExp
     | Sub AExp AExp
     | Mul AExp AExp
     | Div AExp AExp
     | Pow AExp AExp
     | Sum Ident AExp AExp AExp
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Show)
 
 data BExp
     = BTrue
     | BFalse
-    | Eq AExp AExp
+    | Eq  AExp AExp
     | Ne AExp AExp
-    | Lt AExp AExp
-    | Gt AExp AExp
+    | Lt  AExp AExp
+    | Gt  AExp AExp
     | Le AExp AExp
     | Ge AExp AExp
-    | Neg BExp
     | And BExp BExp
-    | Or BExp BExp
-    deriving (Eq, Ord, Show)
+    | Or  BExp BExp
+    | Not BExp
+    deriving (Eq, Show)
 
-mkFor :: Ident -> AExp -> AExp -> Stmt -> Stmt
-mkFor i a b s = Seq (Assign i a) 
-                    (While (Lt (Var i) b) 
-                           (Seq s (Assign i (Add (Var i) (Num 1)))))
-
-class Idents a where 
-  idents :: a -> [Ident]
-
-instance Idents Stmt where 
-    idents Skip = []
-    idents (Assign i _) = [i]
-    idents (ArrAssign i _ _) = [i]
-    idents (Seq s1 s2) = idents s1 ++ idents s2
-    idents (Ite _ bt be) = idents bt ++ idents be
-    idents (While _ bw) = idents bw 
+data Stmt
+    = Skip
+    | Assign Var AExp
+    | ArrAssign Var AExp AExp
+    | Seq Stmt Stmt
+    | If BExp Stmt Stmt
+    | While BExp Stmt
+    deriving (Eq, Show)
