@@ -33,12 +33,12 @@ updateArr arrName idx val st =
 data CostModel = CostModel {
     costNum :: Int
   , costVar :: Int
+  , costArr :: Int
   , costAdd :: Int
   , costSub :: Int
   , costMul :: Int
   , costDiv :: Int
   , costExp :: Int
-  , costSum :: Int
   , costTrue :: Int
   , costFalse :: Int
   , costLe  :: Int
@@ -48,25 +48,23 @@ data CostModel = CostModel {
   , costAnd :: Int
   , costOr  :: Int
   , costEq  :: Int
-  , costDif :: Int
-  , costImp :: Int
-  , costIff :: Int
+  , costNe  :: Int
   , costNeg :: Int
-  , costAss :: Int
-  , costArr :: Int
+  , costAssV :: Int
+  , costAssA :: Int
   , costSkip :: Int
-}
+  } deriving (Eq, Show)
 
 unitModel :: CostModel
 unitModel = CostModel {
     costNum = 1
   , costVar = 1
+  , costArr = 1
   , costAdd = 1
   , costSub = 1
   , costMul = 1
   , costDiv = 1
   , costExp = 1
-  , costSum = 1
   , costTrue = 1
   , costFalse = 1
   , costLe  = 1
@@ -76,11 +74,9 @@ unitModel = CostModel {
   , costAnd = 1
   , costOr  = 1
   , costEq  = 1
-  , costDif = 1
-  , costImp = 1
-  , costIff = 1
+  , costNe  = 1
   , costNeg = 1
-  , costAss = 1
-  , costArr = 1
+  , costAssV = 1
+  , costAssA = 1
   , costSkip = 1
-}
+  }
