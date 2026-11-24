@@ -33,6 +33,7 @@ executable parser
     , megaparsec
     , parser-combinators
     , array
+    , containers
   
   hs-source-dirs:      app, src
   default-language:    Haskell2010
