@@ -139,7 +139,7 @@ evalStmt cm cap costAcc st stmt
                  else if not cond
                    then Terminated c st
                    else case evalStmt cm cap c st body of
-                     Terminated cBody stBody -> evalStmt cm cap cBody stBody (While cond body)
+                     Terminated cBody stBody -> evalStmt cm cap cBody stBody (While condExp body)
                      other                   -> other
 
 checkCap :: Int -> Int -> State -> ExecResult
